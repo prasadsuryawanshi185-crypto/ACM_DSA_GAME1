@@ -14,10 +14,14 @@
     leaderboard: document.getElementById('leaderboard-screen'),
   };
 
+  // --- DEVELOPER SETTINGS ---
+  const EVENT_PASSWORD = "wce"; // Change this to your chosen password
+  const EVENT_DISK_COUNT = 3;   // Number of disks participants will play with
+  // --------------------------
+
   // Login
   const participantNameInput = document.getElementById('participant-name');
-  const participantIdInput = document.getElementById('participant-id');
-  const diskOptions = document.querySelectorAll('.disk-option');
+  const passwordInput = document.getElementById('game-password');
   const startGameBtn = document.getElementById('start-game-btn');
   const loginError = document.getElementById('login-error');
 
@@ -64,7 +68,7 @@
   let state = {
     participantName: '',
     participantId: '',
-    diskCount: 4,
+    diskCount: EVENT_DISK_COUNT,
     towers: [[], [], []], // Each tower is an array of disk sizes (largest first)
     moves: 0,
     minimumMoves: 15,
@@ -108,20 +112,18 @@
 
   // ==================== LOGIN ====================
   function initLogin() {
+    // Prevent double play
+    if (localStorage.getItem('hanoi_has_played') === 'true') {
+      showLoginError('You have already played the game! Please check the leaderboard.');
+      startGameBtn.disabled = true;
+      startGameBtn.textContent = 'ALREADY PLAYED';
+      participantNameInput.disabled = true;
+      if (passwordInput) passwordInput.disabled = true;
+    }
+
     // Restore from localStorage if available
     const savedName = localStorage.getItem('hanoi_participant_name');
-    const savedId = localStorage.getItem('hanoi_participant_id');
     if (savedName) participantNameInput.value = savedName;
-    if (savedId) participantIdInput.value = savedId;
-
-    // Disk selector
-    diskOptions.forEach(btn => {
-      btn.addEventListener('click', () => {
-        diskOptions.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.diskCount = parseInt(btn.dataset.disks, 10);
-      });
-    });
 
     // Start game
     startGameBtn.addEventListener('click', handleStartGame);
@@ -130,9 +132,11 @@
     participantNameInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') handleStartGame();
     });
-    participantIdInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') handleStartGame();
-    });
+    if (passwordInput) {
+      passwordInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') handleStartGame();
+      });
+    }
   }
 
   function handleStartGame() {
@@ -148,18 +152,24 @@
       return;
     }
 
+    const pass = passwordInput ? passwordInput.value.trim() : '';
+    if (pass !== EVENT_PASSWORD) {
+      showLoginError('Incorrect Event Password!');
+      if (passwordInput) passwordInput.focus();
+      return;
+    }
+
     showLoginError('');
     startGameBtn.disabled = true; // Prevent double-click
     state.participantName = name;
-    state.participantId = (participantIdInput.value || '').trim();
+    state.participantId = '';
+    state.diskCount = EVENT_DISK_COUNT;
 
     // Save to localStorage
     localStorage.setItem('hanoi_participant_name', state.participantName);
-    if (state.participantId) {
-      localStorage.setItem('hanoi_participant_id', state.participantId);
-    }
 
     startGame();
+
     // Re-enable after a short delay (in case they return to login)
     setTimeout(() => { startGameBtn.disabled = false; }, 1000);
   }
@@ -408,6 +418,7 @@
 
         if (res.ok) {
           state.submitted = true;
+          localStorage.setItem('hanoi_has_played', 'true');
           state.lastResult = {
             score: data.result.score,
             rank: data.rank,
@@ -422,6 +433,7 @@
         } else if (res.status === 429) {
           // Duplicate submission — treat as success with client-calculated score
           state.submitted = true;
+          localStorage.setItem('hanoi_has_played', 'true');
           const clientScore = calculateClientScore(state.diskCount, state.moves, state.elapsedSeconds);
           state.lastResult = {
             score: clientScore,
@@ -496,10 +508,11 @@
 
       if (!res.ok) throw new Error(data.error || 'Failed to load leaderboard');
 
-      const entries = data.leaderboard || [];
+      const allEntries = data.leaderboard || { 3: [], 4: [], 5: [] };
+      const entries = allEntries[state.diskCount] || [];
 
       if (entries.length === 0) {
-        lbBody.innerHTML = '<tr><td colspan="5" class="lb-empty">No results yet — be the first to play!</td></tr>';
+        lbBody.innerHTML = `<tr><td colspan="5" class="lb-empty">No results yet for ${state.diskCount} disks — be the first!</td></tr>`;
       } else {
         entries.forEach((entry, i) => {
           const tr = document.createElement('tr');
