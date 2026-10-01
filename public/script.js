@@ -509,7 +509,14 @@
       if (!res.ok) throw new Error(data.error || 'Failed to load leaderboard');
 
       const allEntries = data.leaderboard || { 3: [], 4: [], 5: [] };
-      const entries = allEntries[state.diskCount] || [];
+      let entries = [];
+      
+      // Fallback in case Vercel cached the old array format
+      if (Array.isArray(allEntries)) {
+        entries = allEntries.filter(e => e.diskCount === state.diskCount);
+      } else {
+        entries = allEntries[state.diskCount] || [];
+      }
 
       if (entries.length === 0) {
         lbBody.innerHTML = `<tr><td colspan="5" class="lb-empty">No results yet for ${state.diskCount} disks — be the first!</td></tr>`;

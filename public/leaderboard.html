@@ -209,6 +209,32 @@
     .rank-2 td { color: var(--silver); font-weight: 700; }
     .rank-3 td { color: var(--bronze); font-weight: 700; }
 
+    .tabs {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .tab-btn {
+      padding: 8px 24px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      color: var(--text-secondary);
+      font-family: var(--font-tech);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, var(--spider-red), var(--neon-pink));
+      color: white;
+      border-color: transparent;
+      box-shadow: 0 0 15px rgba(255, 45, 149, 0.4);
+    }
+    
     .loading { text-align: center; padding: 30px; color: var(--text-secondary); }
     .error { text-align: center; padding: 20px; color: var(--danger); }
     .empty { text-align: center; padding: 30px; color: var(--text-secondary); font-style: italic; }
@@ -228,6 +254,7 @@
     @media (max-width: 600px) {
       h1 { font-size: 2rem; }
       td, th { font-size: 0.75rem; padding: 8px 4px; }
+      .tab-btn { padding: 6px 16px; font-size: 0.7rem; }
     }
   </style>
 </head>
@@ -247,6 +274,12 @@
           Auto-refreshes every 10 seconds
         </div>
         <button class="refresh-btn" onclick="fetchLeaderboard()">↻ Refresh Now</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="setTab(3)">3 Disks</button>
+        <button class="tab-btn" onclick="setTab(4)">4 Disks</button>
+        <button class="tab-btn" onclick="setTab(5)">5 Disks</button>
       </div>
 
       <div id="loading" class="loading">
@@ -273,6 +306,16 @@
   </div>
 
   <script>
+    let currentTab = 3;
+    let fullLeaderboardData = null;
+
+    function setTab(diskCount) {
+      currentTab = diskCount;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      renderTable();
+    }
+
     function formatTime(totalSeconds) {
       const s = Math.max(0, Math.round(totalSeconds));
       const mm = String(Math.floor(s / 60)).padStart(2, '0');
@@ -280,52 +323,77 @@
       return mm + ':' + ss;
     }
 
+    function renderTable() {
+      const tbody = document.getElementById('lb-body');
+      const table = document.getElementById('leaderboard-table');
+      
+      if (!fullLeaderboardData) return;
+      
+      const entries = fullLeaderboardData[currentTab] || [];
+      tbody.innerHTML = '';
+
+      if (entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">No results yet — be the first!</td></tr>';
+      } else {
+        const medals = ['🥇', '🥈', '🥉'];
+        entries.forEach(function(entry, i) {
+          const tr = document.createElement('tr');
+          if (i === 0) tr.className = 'rank-1';
+          if (i === 1) tr.className = 'rank-2';
+          if (i === 2) tr.className = 'rank-3';
+
+          tr.innerHTML =
+            '<td>' + (i < 3 ? medals[i] : '#' + (i + 1)) + '</td>' +
+            '<td>' + (entry.participantName || 'Anonymous') + '</td>' +
+            '<td>' + entry.score + '</td>' +
+            '<td>' + (entry.diskCount || '—') + '</td>' +
+            '<td>' + entry.moves + '/' + (entry.minimumMoves || '—') + '</td>' +
+            '<td style="text-align:right">' + formatTime(entry.timeTaken || 0) + '</td>';
+
+          tbody.appendChild(tr);
+        });
+      }
+      table.style.display = 'table';
+    }
+
     async function fetchLeaderboard() {
       const loading = document.getElementById('loading');
       const table = document.getElementById('leaderboard-table');
       const error = document.getElementById('error');
-      const tbody = document.getElementById('lb-body');
 
-      loading.style.display = 'block';
+      if (!fullLeaderboardData) {
+        loading.style.display = 'block';
+        table.style.display = 'none';
+      }
       error.style.display = 'none';
-      table.style.display = 'none';
 
       try {
         const res = await fetch('/api/leaderboard');
         if (!res.ok) throw new Error('HTTP ' + res.status);
+        
         const data = await res.json();
-        const entries = data.leaderboard || [];
-
-        tbody.innerHTML = '';
-
-        if (entries.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty">No results yet — be the first!</td></tr>';
-        } else {
-          const medals = ['🥇', '🥈', '🥉'];
-          entries.forEach(function(entry, i) {
-            const tr = document.createElement('tr');
-            if (i === 0) tr.className = 'rank-1';
-            if (i === 1) tr.className = 'rank-2';
-            if (i === 2) tr.className = 'rank-3';
-
-            tr.innerHTML =
-              '<td>' + (i < 3 ? medals[i] : '#' + (i + 1)) + '</td>' +
-              '<td>' + (entry.participantName || 'Anonymous') + '</td>' +
-              '<td>' + entry.score + '</td>' +
-              '<td>' + (entry.diskCount || '—') + '</td>' +
-              '<td>' + entry.moves + '/' + (entry.minimumMoves || '—') + '</td>' +
-              '<td style="text-align:right">' + formatTime(entry.timeTaken || 0) + '</td>';
-
-            tbody.appendChild(tr);
+        let rawData = data.leaderboard || { 3: [], 4: [], 5: [] };
+        
+        // Fallback in case Vercel cached the old array format
+        if (Array.isArray(rawData)) {
+          fullLeaderboardData = { 3: [], 4: [], 5: [] };
+          rawData.forEach(e => {
+            if (fullLeaderboardData[e.diskCount]) {
+              fullLeaderboardData[e.diskCount].push(e);
+            }
           });
+        } else {
+          fullLeaderboardData = rawData;
         }
-
+        
+        renderTable();
         loading.style.display = 'none';
-        table.style.display = 'table';
       } catch (err) {
-        loading.style.display = 'none';
-        error.style.display = 'block';
-        error.textContent = 'Failed to load leaderboard: ' + err.message;
+        if (!fullLeaderboardData) {
+          loading.style.display = 'none';
+          error.style.display = 'block';
+          error.textContent = 'Failed to load leaderboard: ' + err.message;
+        }
       }
     }
 
