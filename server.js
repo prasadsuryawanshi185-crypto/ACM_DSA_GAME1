@@ -28,17 +28,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ==========================================
 // DATABASE SETUP & CACHE
 // ==========================================
-let db = null;
+let cachedClient = null;
+let cachedDb = null;
 let gameResultsCollection = null;
 let leaderboardCache = [];
 let lastCacheUpdate = 0;
 const CACHE_TTL = 5000; // 5 seconds
 
 /**
- * Connect to MongoDB. Does NOT crash the server if connection fails —
- * the server will start and return 503 for DB-dependent routes.
+ * Connect to MongoDB. Supports serverless connection caching (Vercel).
+ * Does NOT crash the server if connection fails.
  */
 async function connectDB() {
+  if (cachedClient && cachedDb && gameResultsCollection) {
+    return; // Use cached connection in serverless environments
+  }
+  
   try {
     console.log('Connecting to MongoDB...');
     const client = new MongoClient(MONGODB_URI, {
@@ -46,8 +51,10 @@ async function connectDB() {
       connectTimeoutMS: 5000,
     });
     await client.connect();
-    db = client.db(DB_NAME);
-    gameResultsCollection = db.collection('gameResults');
+    
+    cachedClient = client;
+    cachedDb = client.db(DB_NAME);
+    gameResultsCollection = cachedDb.collection('gameResults');
 
     // Create indexes for performance
     await gameResultsCollection.createIndex({ score: -1, timeTaken: 1 });
@@ -61,19 +68,25 @@ async function connectDB() {
     // Handle connection loss
     client.on('close', () => {
       console.error('MongoDB connection lost');
-      db = null;
+      cachedClient = null;
+      cachedDb = null;
       gameResultsCollection = null;
     });
   } catch (error) {
     console.error('MongoDB connection failed:', error.message);
-    console.error('Server will start without database. API endpoints will return 503.');
-    db = null;
+    console.error('API endpoints will return 503 until database is available.');
+    cachedClient = null;
+    cachedDb = null;
     gameResultsCollection = null;
   }
 }
 
-/** Middleware: check if database is available */
-function requireDB(req, res, next) {
+/** Middleware: check if database is available, attempt lazy connect for serverless */
+async function requireDB(req, res, next) {
+  if (!gameResultsCollection) {
+    await connectDB();
+  }
+  
   if (!gameResultsCollection) {
     return res.status(503).json({ error: 'Database unavailable. Please try again later.' });
   }
@@ -242,8 +255,12 @@ app.post('/api/submit', requireDB, async (req, res) => {
 // Get Leaderboard (served from cache)
 app.get('/api/leaderboard', async (req, res) => {
   try {
+    if (!gameResultsCollection) {
+      await connectDB();
+    }
+
     // Refresh cache if stale (but don't fail if DB is down — serve stale cache)
-    if (gameResultsCollection && Date.now() - lastCacheUpdate > CACHE_TTL) {
+    if (gameResultsCollection && (leaderboardCache.length === 0 || Date.now() - lastCacheUpdate > CACHE_TTL)) {
       await updateLeaderboardCache();
     }
 
@@ -292,24 +309,38 @@ app.get('*', (req, res) => {
 });
 
 // ==========================================
-// START SERVER
+// START SERVER / EXPORT FOR VERCEL
 // ==========================================
-async function startServer() {
-  await connectDB();
 
-  // Periodic cache refresh (if DB is connected)
-  setInterval(() => {
-    if (gameResultsCollection) {
-      updateLeaderboardCache();
-    }
-  }, CACHE_TTL);
+if (process.env.VERCEL) {
+  // ----------------------------------------------------
+  // VERCEL SERVERLESS ENVIRONMENT
+  // ----------------------------------------------------
+  // In a serverless environment, Vercel handles the listening.
+  // We don't use setInterval because background processes are frozen.
+  // Connections and caching will happen lazily on requests.
+  module.exports = app;
+} else {
+  // ----------------------------------------------------
+  // LOCAL / STANDARD NODE ENVIRONMENT
+  // ----------------------------------------------------
+  async function startServer() {
+    await connectDB();
 
-  app.listen(PORT, () => {
-    console.log(`DSA Launchpad — Tower of Hanoi server running on http://localhost:${PORT}`);
-    console.log(`Game:        http://localhost:${PORT}/`);
-    console.log(`Leaderboard: http://localhost:${PORT}/leaderboard.html`);
-    console.log(`API Health:  http://localhost:${PORT}/api/health`);
-  });
+    // Periodic cache refresh (if DB is connected)
+    setInterval(() => {
+      if (gameResultsCollection) {
+        updateLeaderboardCache();
+      }
+    }, CACHE_TTL);
+
+    app.listen(PORT, () => {
+      console.log(`DSA Launchpad — Tower of Hanoi server running on http://localhost:${PORT}`);
+      console.log(`Game:        http://localhost:${PORT}/`);
+      console.log(`Leaderboard: http://localhost:${PORT}/leaderboard.html`);
+      console.log(`API Health:  http://localhost:${PORT}/api/health`);
+    });
+  }
+
+  startServer();
 }
-
-startServer();
