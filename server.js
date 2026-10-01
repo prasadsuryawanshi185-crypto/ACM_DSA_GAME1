@@ -31,7 +31,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 let cachedClient = null;
 let cachedDb = null;
 let gameResultsCollection = null;
-let leaderboardCache = [];
+let leaderboardCache = { 3: [], 4: [], 5: [] };
 let lastCacheUpdate = 0;
 const CACHE_TTL = 5000; // 5 seconds
 
@@ -100,24 +100,32 @@ async function requireDB(req, res, next) {
 async function updateLeaderboardCache() {
   if (!gameResultsCollection) return;
   try {
-    const results = await gameResultsCollection
-      .find({})
-      .sort({ score: -1, timeTaken: 1 })
-      .limit(50)
-      .toArray();
+    const fetchTop = async (diskCount) => {
+      const results = await gameResultsCollection
+        .find({ diskCount })
+        .sort({ score: -1, timeTaken: 1 })
+        .limit(50)
+        .toArray();
+        
+      return results.map((entry, index) => ({
+        rank: index + 1,
+        participantName: entry.participantName,
+        participantId: entry.participantId,
+        diskCount: entry.diskCount,
+        moves: entry.moves,
+        minimumMoves: entry.minimumMoves,
+        timeTaken: entry.timeTaken,
+        score: entry.score,
+        completedAt: entry.completedAt,
+        _id: entry._id,
+      }));
+    };
 
-    leaderboardCache = results.map((entry, index) => ({
-      rank: index + 1,
-      participantName: entry.participantName,
-      participantId: entry.participantId,
-      diskCount: entry.diskCount,
-      moves: entry.moves,
-      minimumMoves: entry.minimumMoves,
-      timeTaken: entry.timeTaken,
-      score: entry.score,
-      completedAt: entry.completedAt,
-      _id: entry._id,
-    }));
+    leaderboardCache = {
+      3: await fetchTop(3),
+      4: await fetchTop(4),
+      5: await fetchTop(5)
+    };
     lastCacheUpdate = Date.now();
   } catch (error) {
     console.error('Failed to update leaderboard cache:', error.message);
@@ -228,8 +236,8 @@ app.post('/api/submit', requireDB, async (req, res) => {
     // Refresh cache immediately
     await updateLeaderboardCache();
 
-    // Find participant's rank in the updated cache
-    const rank = leaderboardCache.findIndex(
+    // Find participant's rank in the updated cache for this disk count
+    const rank = leaderboardCache[parsedDiskCount].findIndex(
       e => e._id && e._id.toString() === resultDoc._id.toString()
     ) + 1;
 
@@ -260,12 +268,16 @@ app.get('/api/leaderboard', async (req, res) => {
     }
 
     // Refresh cache if stale (but don't fail if DB is down — serve stale cache)
-    if (gameResultsCollection && (leaderboardCache.length === 0 || Date.now() - lastCacheUpdate > CACHE_TTL)) {
+    if (gameResultsCollection && (!leaderboardCache[3] || Date.now() - lastCacheUpdate > CACHE_TTL)) {
       await updateLeaderboardCache();
     }
 
     // Strip _id from response
-    const cleanCache = leaderboardCache.map(({ _id, ipAddress, ...rest }) => rest);
+    const cleanCache = {
+      3: (leaderboardCache[3] || []).map(({ _id, ipAddress, ...rest }) => rest),
+      4: (leaderboardCache[4] || []).map(({ _id, ipAddress, ...rest }) => rest),
+      5: (leaderboardCache[5] || []).map(({ _id, ipAddress, ...rest }) => rest)
+    };
 
     res.json({
       leaderboard: cleanCache,
