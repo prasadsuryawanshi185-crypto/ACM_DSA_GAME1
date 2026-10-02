@@ -184,6 +184,7 @@
     state.minimumMoves = Math.pow(2, state.diskCount) - 1;
     state.selectedTower = null;
     state.running = true;
+    state.animating = false;
     state.submitted = false;
     state.lastResult = null;
     state.elapsedSeconds = 0;
@@ -312,7 +313,7 @@
 
   // ==================== TOWER CLICK HANDLING ====================
   function handleTowerClick(towerIndex) {
-    if (!state.running) return;
+    if (!state.running || state.animating) return;
 
     if (state.selectedTower === null) {
       // SELECT: pick up top disk from this tower
@@ -322,10 +323,14 @@
       }
       state.selectedTower = towerIndex;
       showGameMessage('Now click another tower to place the disk, or click the same tower to cancel.', 'info');
+      renderBoard();
+      updateHUD();
     } else if (state.selectedTower === towerIndex) {
       // DESELECT: put disk back
       state.selectedTower = null;
       showGameMessage('Disk deselected.', 'info');
+      renderBoard();
+      updateHUD();
     } else {
       // MOVE: try to place disk
       const fromTower = state.selectedTower;
@@ -338,23 +343,86 @@
         // INVALID MOVE: larger disk on smaller
         showGameMessage(`❌ Invalid move! Disk ${movingDisk} cannot go on disk ${targetTop}.`, 'error');
         state.selectedTower = null;
+        renderBoard();
+        updateHUD();
       } else {
         // VALID MOVE
-        state.towers[fromTower].pop();
-        state.towers[towerIndex].push(movingDisk);
-        state.moves++;
-        state.selectedTower = null;
-        showGameMessage('', 'info');
+        animateDisk(fromTower, towerIndex, movingDisk, () => {
+          state.towers[fromTower].pop();
+          state.towers[towerIndex].push(movingDisk);
+          state.moves++;
+          state.selectedTower = null;
+          showGameMessage('', 'info');
+          
+          renderBoard();
+          updateHUD();
+
+          // Check completion after rendering
+          if (state.towers[2].length === state.diskCount) {
+            checkCompletion();
+          }
+        });
       }
     }
+  }
 
-    renderBoard();
-    updateHUD();
-
-    // Check completion after rendering
-    if (state.selectedTower === null && state.towers[2].length === state.diskCount) {
-      checkCompletion();
-    }
+  // ==================== DISK ANIMATION ====================
+  function animateDisk(fromTower, toTower, movingDiskSize, callback) {
+    state.animating = true;
+    
+    const fromStack = stacks[fromTower];
+    const toStack = stacks[toTower];
+    // The moving disk is the last child of the source stack
+    const diskEl = fromStack.lastElementChild;
+    
+    // 1. Remove lifting style temporarily and disable transition to measure resting position instantly
+    diskEl.style.transition = 'none';
+    diskEl.classList.remove('lifting');
+    const startRect = diskEl.getBoundingClientRect();
+    
+    // 2. Temporarily move disk to destination stack to measure end position
+    toStack.appendChild(diskEl);
+    const endRect = diskEl.getBoundingClientRect();
+    
+    // 3. Move it back to source for animation start
+    fromStack.appendChild(diskEl);
+    diskEl.style.transition = '';
+    
+    // 4. Calculate heights for the "clearance" peak
+    const sourceTowerRect = towerEls[fromTower].getBoundingClientRect();
+    const targetTowerRect = towerEls[toTower].getBoundingClientRect();
+    // Peak height should be higher than both towers, but not off screen
+    const peakY = Math.max(10, Math.min(sourceTowerRect.top, targetTowerRect.top) - 50);
+    
+    // Calculate translate distances relative to startRect
+    let upY = peakY - startRect.top;
+    // Ensure it always moves up at least 20px visually even if towers are short
+    if (upY > -20) upY = -20;
+    
+    const moveX = endRect.left - startRect.left;
+    const moveY = endRect.top - startRect.top;
+    
+    // 5. Create 3-stage animation (UP -> ACROSS -> DOWN)
+    // Starting slightly lifted (-10px) and scaled because it was selected
+    const keyframes = [
+      { transform: `translate(0, -10px) scale(1.05)`, offset: 0 },
+      { transform: `translate(0, ${upY}px) scale(1.05)`, offset: 0.3 },
+      { transform: `translate(${moveX}px, ${upY}px) scale(1.0)`, offset: 0.7 },
+      { transform: `translate(${moveX}px, ${moveY}px) scale(1.0)`, offset: 1.0 }
+    ];
+    
+    // 6. Animate using Web Animations API
+    const animation = diskEl.animate(keyframes, {
+      duration: 500, // 500ms total
+      easing: 'ease-in-out',
+      fill: 'forwards'
+    });
+    
+    animation.onfinish = () => {
+      state.animating = false;
+      // Remove any inline styles applied by animation if needed (fill: forwards keeps them, but renderBoard clears the element anyway)
+      callback();
+    };
   }
 
   // ==================== COMPLETION CHECK ====================
