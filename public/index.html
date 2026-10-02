@@ -927,7 +927,10 @@
         <input id="game-password" type="password" class="input-field" placeholder="Enter password to play" maxlength="20" />
       </div>
 
-      <button id="start-game-btn" class="btn-primary">START GAME 🕷️</button>
+      <div class="login-actions" style="display: flex; gap: 10px; margin-top: 15px;">
+        <button id="start-game-btn" class="btn-primary" style="flex: 1;">START GAME 🕷️</button>
+        <button id="login-view-lb-btn" class="btn-secondary" style="flex: 1;">🏆 Leaderboard</button>
+      </div>
       <div id="login-error" class="login-error"></div>
       <p class="login-note">Tip: Fewer moves + faster time = higher score</p>
     </div>
@@ -960,8 +963,8 @@
           <div id="hud-timer" class="hud-value timer">05:00</div>
         </div>
         <div id="hud-player" class="player-badge"></div>
-        <button id="restart-btn" class="btn-small">↻ Restart</button>
-        <button id="view-lb-btn" class="btn-small">🏆 Board</button>
+        <button id="restart-btn" class="btn-small" style="display:none;">↻ Restart</button>
+        <button id="view-lb-btn" class="btn-small" style="display:none;">🏆 Board</button>
       </div>
     </div>
 

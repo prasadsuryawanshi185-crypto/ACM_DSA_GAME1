@@ -19,10 +19,10 @@
   const EVENT_DISK_COUNT = 3;   // Number of disks participants will play with
   // --------------------------
 
-  // Login
   const participantNameInput = document.getElementById('participant-name');
   const passwordInput = document.getElementById('game-password');
   const startGameBtn = document.getElementById('start-game-btn');
+  const loginViewLbBtn = document.getElementById('login-view-lb-btn');
   const loginError = document.getElementById('login-error');
 
   // Game HUD
@@ -653,6 +653,14 @@
 
   // ==================== EVENT LISTENERS ====================
   function bindEvents() {
+    // View Leaderboard from login screen
+    if (loginViewLbBtn) {
+      loginViewLbBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        showLeaderboard();
+      });
+    }
+
     // Tower clicks (works for both mouse and touch)
     let touchHandled = false;
     towerEls.forEach((el) => {
